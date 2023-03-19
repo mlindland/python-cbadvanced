@@ -1,5 +1,7 @@
+import datetime
 import json
 import pprint
+import time
 import uuid
 
 import requests
@@ -9,7 +11,7 @@ from cb_auth import CBAuth
 class Client:
 
     def __init__(self, key, b64secret):
-        # "https://api.pro.coinbase.com"
+        # "https://api.coinbase.com/api/v3"
         """ Create an instance of the AuthenticatedClient class.
         Args:
             key (str): Your API key.
@@ -62,26 +64,9 @@ class Client:
         return self.get_account('')
 
     def get_account(self, account_id):
-        """ Get information for a single account.
-        Use this endpoint when you know the account_id.
-        Args:
-            account_id (str): Account id for account you want to get.
-        Returns:
-            dict: Account information. Example::
-                {
-                    "id": "a1b2c3d4",
-                    "balance": "1.100",
-                    "holds": "0.100",
-                    "available": "1.00",
-                    "currency": "USD"
-                }
-        """
         return self._send_message('get', '/brokerage/accounts/' + account_id)
 
-    def place_order(self, product_id, side, client_order_id=uuid.uuid1().__str__(), **kwargs):
-        if client_order_id is None:
-            raise ValueError('Client Order Id cannot be empty')
-
+    def create_order(self, product_id: str, side: str, client_order_id=uuid.uuid1().__str__(), **kwargs):
         # Build params dict
         params = {'side': side,
                   'product_id': product_id,
@@ -101,20 +86,30 @@ class Client:
         params = {'order_ids': order_id}
         return self._send_message('post', '/brokerage/orders/batch_cancel', data=json.dumps(params))
 
-    def get_products(self):
-        """Get a list of available currency pairs for trading.
-        Returns:
-            list: Info about all currency pairs. Example::
-                [
-                    {
-                        "id": "BTC-USD",
-                        "display_name": "BTC/USD",
-                        "base_currency": "BTC",
-                        "quote_currency": "USD",
-                        "base_min_size": "0.01",
-                        "base_max_size": "10000.00",
-                        "quote_increment": "0.01"
-                    }
-                ]
-        """
-        return self._send_message('get', '/brokerage/products')
+    def list_orders(self, **kwargs):
+        return self._send_message('get', '/brokerage/orders/historical/batch', params=kwargs)
+
+    def list_fills(self, **kwargs):
+        return self._send_message('get', '/brokerage/orders/historical/fills', params=kwargs)
+
+    def get_order(self, order_id, **kwargs):
+        return self._send_message('get', f'/brokerage/orders/historical/{order_id}', params=kwargs)
+
+    def list_products(self):
+        return self.get_product('')
+
+    def get_product(self, product_id: str):
+        return self._send_message('get', f'/brokerage/products/{product_id}')
+
+    def get_product_candles(self, product_id: str,
+                            start: str = str(int((datetime.datetime.now() - datetime.timedelta(minutes=24)).timestamp())),
+                            end: str = str(int(datetime.datetime.now().timestamp())),
+                            granularity: str = 'FIFTEEN_MINUTE'):
+        params = {'start': start,
+                  'end': end,
+                  'granularity': granularity}
+        return self._send_message('get', f'/brokerage/products/{product_id}/candles', params=params)
+
+    def get_market_trades(self, product_id: str, limit: int):
+        params = {'limit': limit}
+        return self._send_message('get', f'/brokerage/products/{product_id}/ticker', params=params)

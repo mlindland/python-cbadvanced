@@ -14,7 +14,7 @@ class CBAuth(AuthBase):
     def __call__(self, request):
         timestamp = str(int(time.time()))
         message = ''.join([timestamp, request.method,
-                           request.path_url, str(request.body or '')])
+                           request.path_url.split('?')[0], str(request.body or '')])
         request.headers.update(get_auth_headers(timestamp, message,
                                                 self.api_key,
                                                 self.secret_key))
