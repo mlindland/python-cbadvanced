@@ -1,11 +1,9 @@
 import datetime
 import json
-import pprint
-import time
 import uuid
 
 import requests
-from cb_auth import CBAuth
+from cbadvanced.cb_auth import CBAuth
 
 
 class Client:
