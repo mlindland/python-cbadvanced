@@ -61,16 +61,18 @@ class Client:
         return result.json()
 
     def get_accounts(self):
-        return self.get_account('')
+        return self.get_account('', limit='250')
 
-    def get_account(self, account_id):
-        return self._send_message('get', '/brokerage/accounts/' + account_id)
+    def get_account(self, account_id, **kwargs):
+        return self._send_message('get', f'/brokerage/accounts/{account_id}', params=kwargs)
 
-    def create_order(self, product_id: str, side: str, client_order_id=uuid.uuid1().__str__(), **kwargs):
+    def create_order(self, product_id: str, side: str, client_order_id: uuid, **kwargs):
         # Build params dict
+        if client_order_id is None:
+            client_order_id = uuid.uuid4()
         params = {'side': side,
                   'product_id': product_id,
-                  'client_order_id': client_order_id,
+                  'client_order_id': client_order_id.__str__(),
                   'order_configuration': {
                       'limit_limit_gtc': {
                           'base_size': str(kwargs.get('size')),
@@ -102,11 +104,11 @@ class Client:
         return self._send_message('get', f'/brokerage/products/{product_id}')
 
     def get_product_candles(self, product_id: str,
-                            start: str = str(int((datetime.datetime.now() - datetime.timedelta(minutes=24)).timestamp())),
-                            end: str = str(int(datetime.datetime.now().timestamp())),
+                            start: int = int((datetime.datetime.now() - datetime.timedelta(minutes=24)).timestamp()),
+                            end: int = int(datetime.datetime.now().timestamp()),
                             granularity: str = 'FIFTEEN_MINUTE'):
-        params = {'start': start,
-                  'end': end,
+        params = {'start': str(start),
+                  'end': str(end),
                   'granularity': granularity}
         return self._send_message('get', f'/brokerage/products/{product_id}/candles', params=params)
 
