@@ -10,15 +10,15 @@ from cbadvanced.cb_auth import CBAuth
 
 class Client:
 
-    def __init__(self, key, b64secret):
+    def __init__(self, key, secret):
         # "https://api.coinbase.com/api/v3"
         """ Create an instance of the AuthenticatedClient class.
         Args:
             key (str): Your API key.
-            b64secret (str): The secret key matching your API key.
+            secret (str): The secret key matching your API key.
         """
         self.URL = 'https://api.coinbase.com/api/v3'
-        self.auth = CBAuth(key, b64secret)
+        self.auth = CBAuth(key, secret)
         self.session = requests.Session()
 
     # def _handle_response(response):
