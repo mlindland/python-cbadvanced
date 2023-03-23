@@ -102,7 +102,7 @@ class Client:
         return self._send_message('get', f'/brokerage/products/{product_id}')
 
     def get_product_candles(self, product_id: str,
-                            start: int = int((datetime.datetime.now() - datetime.timedelta(minutes=24)).timestamp()),
+                            start: int = int((datetime.datetime.now() - datetime.timedelta(hours=24)).timestamp()),
                             end: int = int(datetime.datetime.now().timestamp()),
                             granularity: str = 'FIFTEEN_MINUTE'):
         params = {'start': str(start),
