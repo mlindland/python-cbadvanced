@@ -1,7 +1,5 @@
 import datetime
 import json
-import pprint
-import time
 import uuid
 
 import requests
