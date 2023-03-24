@@ -4,6 +4,9 @@ import uuid
 
 import requests
 from cbadvanced.cb_auth import CBAuth
+from cbadvanced.exceptions import (
+    AdvancedTradeAPIExceptions,
+    AdvancedTradeRequestException)
 
 
 class Client:
@@ -19,29 +22,35 @@ class Client:
         self.auth = CBAuth(key, secret)
         self.session = requests.Session()
 
-    # def _handle_response(response):
-    #     """Internal helper for handling API responses from the COINBASE server.
-    #     Raises the appropriate exceptions when necessary; otherwise, returns the
-    #     response.
-    #     """
-    # if not str(response.status_code).startswith('2'):
-    #     raise KucoinAPIException(response)
-    # try:
-    #     res = response.json()
-    #
-    #     if 'code' in res and res['code'] != "200000":
-    #         # raise KucoinAPIException(response)
-    #
-    #     if 'success' in res and not res['success']:
-    #         # raise KucoinAPIException(response)
-    #
-    #     # by default return full response
-    #     # if it's a normal response we have a data attribute, return that
-    #     if 'data' in res:
-    #         res = res['data']
-    #     return res
-    # except ValueError:
-    #     raise KucoinRequestException('Invalid Response: %s' % response.text)
+    @staticmethod
+    def _handle_response(response):
+        """Internal helper for handling API responses from the COINBASE server.
+        Raises the appropriate exceptions when necessary; otherwise, returns the
+        response.
+
+        Typical status codes
+
+        400	Bad Request -- Invalid request format
+
+        401	Unauthorized -- Invalid API Key
+
+        403	Forbidden -- You do not have access to the requested resource
+
+        404	Not Found
+
+        500	Internal Server Error -- We had a problem with our server
+        """
+        if not str(response.status_code).startswith('2'):
+            raise AdvancedTradeAPIExceptions(response)
+
+        try:
+            result = response.json()
+
+            # by default return full response
+            # if it's a normal response we have a data attribute, return that
+            return result
+        except ValueError:
+            raise AdvancedTradeRequestException('Invalid Response: %s' % response.text)
 
     def _send_message(self, method, endpoint, params=None, data=None):
         """Send API request.
@@ -54,9 +63,9 @@ class Client:
             dict/list: JSON response
         """
         url = self.URL + endpoint
-        result = self.session.request(method, url, params=params, data=data,
-                                      auth=self.auth, timeout=30)
-        return result.json()
+        response = self.session.request(method, url, params=params, data=data,
+                                        auth=self.auth, timeout=30)
+        return self._handle_response(response)
 
     def get_accounts(self):
         return self.get_account('', limit='250')
@@ -64,7 +73,7 @@ class Client:
     def get_account(self, account_id, **kwargs):
         return self._send_message('get', f'/brokerage/accounts/{account_id}', params=kwargs)
 
-    def create_order(self, product_id: str, side: str, client_order_id: uuid, **kwargs):
+    def create_order(self, product_id: str, side: str, client_order_id: uuid = None, **kwargs):
         # Build params dict
         if client_order_id is None:
             client_order_id = uuid.uuid4()
@@ -105,6 +114,9 @@ class Client:
                             start: int = int((datetime.datetime.now() - datetime.timedelta(hours=24)).timestamp()),
                             end: int = int(datetime.datetime.now().timestamp()),
                             granularity: str = 'FIFTEEN_MINUTE'):
+        val1 = (end - start) / 900
+        if val1 > 300:
+            print("Intervals: ", val1)
         params = {'start': str(start),
                   'end': str(end),
                   'granularity': granularity}
