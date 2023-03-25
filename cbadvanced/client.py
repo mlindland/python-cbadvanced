@@ -114,9 +114,6 @@ class Client:
                             start: int = int((datetime.datetime.now() - datetime.timedelta(hours=24)).timestamp()),
                             end: int = int(datetime.datetime.now().timestamp()),
                             granularity: str = 'FIFTEEN_MINUTE'):
-        val1 = (end - start) / 900
-        if val1 > 300:
-            print("Intervals: ", val1)
         params = {'start': str(start),
                   'end': str(end),
                   'granularity': granularity}
