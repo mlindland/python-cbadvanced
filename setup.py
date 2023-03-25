@@ -3,7 +3,7 @@
 from setuptools import setup, find_packages
 
 install_requires = [
-    'requests~=2.28.1',
+    'requests>=2.13',
 ]
 
 with open("README.md", "r") as fh:
