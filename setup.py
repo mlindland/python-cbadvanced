@@ -10,7 +10,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(
-    name='python-cbadvanced',
+    name='cbadvanced',
     version='0.1',
     author='Magnus Lindland',
     author_email='magnuslindland@proton.me',
