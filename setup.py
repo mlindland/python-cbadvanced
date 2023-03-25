@@ -18,7 +18,6 @@ setup(
     url='https://github.com/mlindland/python-cbadvanced.git',
     packages=find_packages(),
     install_requires=install_requires,
-    tests_require=tests_require,
     description='The unofficial Python client for the Coinbase Advanced Trade API',
     long_description=long_description,
     long_description_content_type="text/markdown",
