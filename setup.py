@@ -3,7 +3,7 @@
 from setuptools import setup, find_packages
 
 install_requires = [
-    'requests>=2.13',
+    'requests>=2.20',
 ]
 
 with open("README.md", "r") as fh:
@@ -11,7 +11,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name='cbadvanced',
-    version='0.1',
+    version='0.2',
     author='Magnus Lindland',
     author_email='magnuslindland@proton.me',
     license='MIT',
