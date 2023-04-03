@@ -86,7 +86,6 @@ class Client:
                           'limit_price': str(kwargs.get('price'))
                       }
                   }}
-        params.update(kwargs)
         return self._send_message('post', '/brokerage/orders', data=json.dumps(params))
 
     def cancel_orders(self, order_id: []):
