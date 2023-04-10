@@ -74,18 +74,29 @@ class Client:
         return self._send_message('get', f'/brokerage/accounts/{account_id}', params=kwargs)
 
     def create_order(self, product_id: str, side: str, client_order_id: uuid = None, **kwargs):
-        # Build params dict
         if client_order_id is None:
             client_order_id = uuid.uuid4()
-        params = {'side': side,
-                  'product_id': product_id,
-                  'client_order_id': client_order_id.__str__(),
-                  'order_configuration': {
-                      'limit_limit_gtc': {
-                          'base_size': str(kwargs.get('size')),
-                          'limit_price': str(kwargs.get('price'))
-                      }
-                  }}
+        # Build params dict
+        order_type = kwargs.get('type')
+        if order_type == 'market':
+            params = {'side': side,
+                      'product_id': product_id,
+                      'client_order_id': client_order_id.__str__(),
+                      'order_configuration': {
+                          'market_market_ioc': {
+                              'quote_size': str(kwargs.get('size'))
+                          }
+                      }}
+        else:
+            params = {'side': side,
+                      'product_id': product_id,
+                      'client_order_id': client_order_id.__str__(),
+                      'order_configuration': {
+                          'limit_limit_gtc': {
+                              'base_size': str(kwargs.get('size')),
+                              'limit_price': str(kwargs.get('price'))
+                          }
+                      }}
         return self._send_message('post', '/brokerage/orders', data=json.dumps(params))
 
     def cancel_orders(self, order_id: []):
