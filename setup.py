@@ -4,6 +4,8 @@ from setuptools import setup, find_packages
 
 install_requires = [
     "requests>=2.20",
+    "PyJWT>=2.10.1",
+    "cryptography==45.0.4",
 ]
 
 with open("README.md", "r") as fh:
