@@ -13,7 +13,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="cbadvanced",
-    version="2.0.0",
+    version="0.3",
     author="Magnus Lindland",
     author_email="magnuslindland@proton.me",
     license="MIT",
