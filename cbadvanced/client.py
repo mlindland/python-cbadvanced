@@ -1,158 +1,768 @@
-import datetime
-import json
-import uuid
+"""Coinbase Advanced Trade API client.
 
-import requests
-from cbadvanced.cb_auth import CBAuth
-from cbadvanced.exceptions import (
-    AdvancedTradeAPIExceptions,
-    AdvancedTradeRequestException,
+This module provides both synchronous and asynchronous clients for interacting
+with the Coinbase Advanced Trade API.
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
+from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Any
+
+import httpx
+
+from cbadvanced.auth import CoinbaseAuth
+from cbadvanced.exceptions import CoinbaseAPIError, CoinbaseRequestError
+from cbadvanced.models import (
+    Account,
+    AccountsResponse,
+    CancelOrdersResponse,
+    CandlesResponse,
+    CreateOrderResponse,
+    Fill,
+    FillsResponse,
+    Granularity,
+    MarketTradesResponse,
+    Order,
+    OrderSide,
+    OrdersResponse,
+    Product,
+    ProductsResponse,
 )
 
+if TYPE_CHECKING:
+    pass
 
-class Client:
 
-    def __init__(self, key: str, secret: str):
-        # "https://api.coinbase.com/api/v3"
-        """Create an instance of the AuthenticatedClient class.
+# ============================================================================
+# Base Client
+# ============================================================================
+
+
+class BaseClient:
+    """Base class with shared functionality for sync and async clients."""
+
+    BASE_URL: str = "https://api.coinbase.com"
+    API_VERSION: str = "/api/v3"
+    DEFAULT_TIMEOUT: float = 30.0
+
+    def __init__(self, key: str, secret: str, *, timeout: float | None = None) -> None:
+        """Initialize the client.
+
         Args:
-            key (str): Your API key.
-            secret (str): The secret key matching your API key.
+            key: Your Coinbase API key name.
+            secret: Your Coinbase API secret (PEM-encoded private key).
+            timeout: Request timeout in seconds (default: 30).
         """
-        self.URL = "https://api.coinbase.com/api/v3"
-        self.auth = CBAuth(key, secret)
-        self.session = requests.Session()
+        self._auth = CoinbaseAuth(key, secret)
+        self._timeout = timeout or self.DEFAULT_TIMEOUT
+
+    def _build_url(self, endpoint: str) -> str:
+        """Build full URL for an endpoint."""
+        return f"{self.BASE_URL}{self.API_VERSION}{endpoint}"
+
+    def _get_headers(self, method: str, endpoint: str) -> dict[str, str]:
+        """Get headers for a request, including auth."""
+        path = f"{self.API_VERSION}{endpoint}"
+        headers = self._auth.get_auth_headers(method, path)
+        headers["Content-Type"] = "application/json"
+        return headers
 
     @staticmethod
-    def _handle_response(response) -> dict:
+    def _handle_response(response: httpx.Response) -> dict[str, Any]:
+        """Handle API response and raise appropriate exceptions.
+
+        Args:
+            response: The HTTP response object.
+
+        Returns:
+            Parsed JSON response data.
+
+        Raises:
+            CoinbaseAPIError: If the API returns an error response.
+            CoinbaseRequestError: If the response cannot be parsed.
         """
-        Internal helper for handling API responses from the COINBASE server.
-        Raises the appropriate exceptions when necessary; otherwise, returns the
-        response.
-
-        Typical status codes
-
-        400	Bad Request -- Invalid request format
-
-        401	Unauthorized -- Invalid API Key
-
-        403	Forbidden -- You do not have access to the requested resource
-
-        404	Not Found
-
-        500	Internal Server Error -- We had a problem with our server
-        """
-        if not str(response.status_code).startswith("2"):
-            raise AdvancedTradeAPIExceptions(response)
+        if not response.is_success:
+            try:
+                data = response.json()
+            except Exception:
+                data = None
+            raise CoinbaseAPIError(
+                status_code=response.status_code,
+                response_data=data,
+                message=response.text if not data else None,
+            )
 
         try:
-            result = response.json()
+            return response.json()  # type: ignore[no-any-return]
+        except Exception as e:
+            raise CoinbaseRequestError(
+                f"Invalid JSON response: {response.text[:200]}",
+                original_error=e,
+            ) from e
 
-            # by default return full response
-            # if it's a normal response we have a data attribute, return that
-            return result
-        except ValueError:
-            raise AdvancedTradeRequestException("Invalid Response: %s" % response.text)
 
-    def _send_message(self, method, endpoint, params=None, data=None):
-        """Send API request.
+# ============================================================================
+# Async Client
+# ============================================================================
+
+
+class AsyncClient(BaseClient):
+    """Asynchronous client for the Coinbase Advanced Trade API.
+
+    This client uses httpx for async HTTP requests and provides full
+    type hints and Pydantic model responses.
+
+    Example:
+        >>> async with AsyncClient(key="...", secret="...") as client:
+        ...     accounts = await client.get_accounts()
+        ...     for account in accounts:
+        ...         print(f"{account.currency}: {account.available_balance.value}")
+    """
+
+    def __init__(self, key: str, secret: str, *, timeout: float | None = None) -> None:
+        """Initialize the async client.
+
         Args:
-            method (str): HTTP method (get, post, delete, etc.)
-            endpoint (str): Endpoint (to be added to base URL)
-            params (Optional[dict]): HTTP request parameters
-            data (Optional[str]): JSON-encoded string payload for POST
-        Returns:
-            dict/list: JSON response
+            key: Your Coinbase API key name.
+            secret: Your Coinbase API secret (PEM-encoded private key).
+            timeout: Request timeout in seconds (default: 30).
         """
-        url = self.URL + endpoint
-        response = self.session.request(
-            method, url, params=params, data=data, auth=self.auth, timeout=30
+        super().__init__(key, secret, timeout=timeout)
+        self._client: httpx.AsyncClient | None = None
+
+    async def __aenter__(self) -> AsyncClient:
+        """Enter async context manager."""
+        self._client = httpx.AsyncClient(timeout=self._timeout)
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        """Exit async context manager."""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+
+    async def _request(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Make an authenticated API request.
+
+        Args:
+            method: HTTP method.
+            endpoint: API endpoint path.
+            params: Query parameters.
+            json_data: JSON body data.
+
+        Returns:
+            Parsed JSON response.
+        """
+        if self._client is None:
+            raise CoinbaseRequestError("Client not initialized. Use 'async with' context manager.")
+
+        url = self._build_url(endpoint)
+        headers = self._get_headers(method, endpoint)
+
+        response = await self._client.request(
+            method,
+            url,
+            headers=headers,
+            params=params,
+            json=json_data,
         )
         return self._handle_response(response)
 
-    def get_accounts(self):
-        return self.get_account("", limit="250")
+    # ========================================================================
+    # Account Methods
+    # ========================================================================
 
-    def get_account(self, account_id, **kwargs):
-        return self._send_message(
-            "get", f"/brokerage/accounts/{account_id}", params=kwargs
-        )
+    async def get_accounts(self, *, limit: int = 250, cursor: str | None = None) -> list[Account]:
+        """Get all accounts for the authenticated user.
 
-    def create_order(
-        self, product_id: str, side: str, client_order_id: uuid = None, **kwargs
-    ):
-        if client_order_id is None:
-            client_order_id = uuid.uuid4()
-        # Build params dict
-        order_type = kwargs.get("type")
-        if order_type == "market":
-            params = {
-                "side": side,
-                "product_id": product_id,
-                "client_order_id": client_order_id.__str__(),
-                "order_configuration": {
-                    "market_market_ioc": {"quote_size": str(kwargs.get("size"))}
-                },
-            }
-        else:
-            params = {
-                "side": side,
-                "product_id": product_id,
-                "client_order_id": client_order_id.__str__(),
-                "order_configuration": {
-                    "limit_limit_gtc": {
-                        "base_size": str(kwargs.get("size")),
-                        "limit_price": str(kwargs.get("price")),
-                    }
-                },
-            }
-        return self._send_message("post", "/brokerage/orders", data=json.dumps(params))
+        Args:
+            limit: Maximum number of accounts to return (default: 250, max: 250).
+            cursor: Pagination cursor for fetching next page.
 
-    def cancel_orders(self, order_id: list):
-        if not isinstance(order_id, list):
-            order_id = [order_id]
-        params = {"order_ids": order_id}
-        return self._send_message(
-            "post", "/brokerage/orders/batch_cancel", data=json.dumps(params)
-        )
+        Returns:
+            List of Account objects.
+        """
+        params: dict[str, Any] = {"limit": str(limit)}
+        if cursor:
+            params["cursor"] = cursor
 
-    def list_orders(self, **kwargs):
-        return self._send_message(
-            "get", "/brokerage/orders/historical/batch", params=kwargs
-        )
+        data = await self._request("GET", "/brokerage/accounts", params=params)
+        response = AccountsResponse.model_validate(data)
+        return response.accounts
 
-    def list_fills(self, **kwargs):
-        return self._send_message(
-            "get", "/brokerage/orders/historical/fills", params=kwargs
-        )
+    async def get_account(self, account_id: str) -> Account:
+        """Get a specific account by ID.
 
-    def get_order(self, order_id, **kwargs):
-        return self._send_message(
-            "get", f"/brokerage/orders/historical/{order_id}", params=kwargs
-        )
+        Args:
+            account_id: The UUID of the account.
 
-    def list_products(self):
-        return self.get_product("")
+        Returns:
+            Account object.
+        """
+        data = await self._request("GET", f"/brokerage/accounts/{account_id}")
+        return Account.model_validate(data.get("account", data))
 
-    def get_product(self, product_id: str):
-        return self._send_message("get", f"/brokerage/products/{product_id}")
+    # ========================================================================
+    # Product Methods
+    # ========================================================================
 
-    def get_product_candles(
+    async def get_products(
+        self,
+        *,
+        product_type: str | None = None,
+        limit: int | None = None,
+    ) -> list[Product]:
+        """Get all available products.
+
+        Args:
+            product_type: Filter by product type (e.g., "SPOT").
+            limit: Maximum number of products to return.
+
+        Returns:
+            List of Product objects.
+        """
+        params: dict[str, Any] = {}
+        if product_type:
+            params["product_type"] = product_type
+        if limit:
+            params["limit"] = str(limit)
+
+        data = await self._request("GET", "/brokerage/products", params=params or None)
+        response = ProductsResponse.model_validate(data)
+        return response.products
+
+    async def get_product(self, product_id: str) -> Product:
+        """Get a specific product by ID.
+
+        Args:
+            product_id: The product ID (e.g., "BTC-USD").
+
+        Returns:
+            Product object.
+        """
+        data = await self._request("GET", f"/brokerage/products/{product_id}")
+        return Product.model_validate(data)
+
+    async def get_candles(
         self,
         product_id: str,
-        start: int = int(
-            (datetime.datetime.now() - datetime.timedelta(hours=24)).timestamp()
-        ),
-        end: int = int(datetime.datetime.now().timestamp()),
-        granularity: str = "FIFTEEN_MINUTE",
-    ):
-        params = {"start": str(start), "end": str(end), "granularity": granularity}
-        return self._send_message(
-            "get", f"/brokerage/products/{product_id}/candles", params=params
-        )
+        *,
+        start: datetime | int | None = None,
+        end: datetime | int | None = None,
+        granularity: Granularity | str = Granularity.FIFTEEN_MINUTE,
+    ) -> list[dict[str, Any]]:
+        """Get historical candles for a product.
 
-    def get_market_trades(self, product_id: str, limit: int):
-        params = {"limit": limit}
-        return self._send_message(
-            "get", f"/brokerage/products/{product_id}/ticker", params=params
+        Args:
+            product_id: The product ID (e.g., "BTC-USD").
+            start: Start time (datetime or Unix timestamp). Defaults to 24 hours ago.
+            end: End time (datetime or Unix timestamp). Defaults to now.
+            granularity: Candle granularity (default: FIFTEEN_MINUTE).
+
+        Returns:
+            List of candle data dictionaries.
+        """
+        now = datetime.now(timezone.utc)
+
+        # Handle start time
+        if start is None:
+            start_ts = int((now - timedelta(hours=24)).timestamp())
+        elif isinstance(start, datetime):
+            start_ts = int(start.timestamp())
+        else:
+            start_ts = start
+
+        # Handle end time
+        if end is None:
+            end_ts = int(now.timestamp())
+        elif isinstance(end, datetime):
+            end_ts = int(end.timestamp())
+        else:
+            end_ts = end
+
+        # Handle granularity
+        granularity_str = granularity.value if isinstance(granularity, Granularity) else granularity
+
+        params = {
+            "start": str(start_ts),
+            "end": str(end_ts),
+            "granularity": granularity_str,
+        }
+
+        data = await self._request(
+            "GET", f"/brokerage/products/{product_id}/candles", params=params
         )
+        response = CandlesResponse.model_validate(data)
+        return [candle.model_dump() for candle in response.candles]
+
+    async def get_market_trades(self, product_id: str, *, limit: int = 100) -> MarketTradesResponse:
+        """Get recent market trades for a product.
+
+        Args:
+            product_id: The product ID (e.g., "BTC-USD").
+            limit: Maximum number of trades to return (default: 100).
+
+        Returns:
+            MarketTradesResponse with trades and best bid/ask.
+        """
+        params = {"limit": str(limit)}
+        data = await self._request("GET", f"/brokerage/products/{product_id}/ticker", params=params)
+        return MarketTradesResponse.model_validate(data)
+
+    # ========================================================================
+    # Order Methods
+    # ========================================================================
+
+    async def create_order(
+        self,
+        product_id: str,
+        side: OrderSide | str,
+        *,
+        order_type: str = "limit",
+        size: str | None = None,
+        price: str | None = None,
+        client_order_id: str | None = None,
+        **kwargs: Any,
+    ) -> CreateOrderResponse:
+        """Create a new order.
+
+        Args:
+            product_id: The product ID (e.g., "BTC-USD").
+            side: Order side (BUY or SELL).
+            order_type: Order type ("market" or "limit", default: "limit").
+            size: Order size (base currency for limit, quote currency for market).
+            price: Limit price (required for limit orders).
+            client_order_id: Optional client-specified order ID.
+            **kwargs: Additional order parameters.
+
+        Returns:
+            CreateOrderResponse with order details.
+        """
+        if client_order_id is None:
+            client_order_id = str(uuid.uuid4())
+
+        # Normalize side
+        side_str = side.value if isinstance(side, OrderSide) else side.upper()
+
+        # Build order configuration based on type
+        if order_type.lower() == "market":
+            order_config = {"market_market_ioc": {"quote_size": str(size)}}
+        else:
+            if price is None:
+                raise ValueError("price is required for limit orders")
+            order_config = {
+                "limit_limit_gtc": {
+                    "base_size": str(size),
+                    "limit_price": str(price),
+                }
+            }
+
+        payload = {
+            "product_id": product_id,
+            "side": side_str,
+            "client_order_id": client_order_id,
+            "order_configuration": order_config,
+            **kwargs,
+        }
+
+        data = await self._request("POST", "/brokerage/orders", json_data=payload)
+        return CreateOrderResponse.model_validate(data)
+
+    async def cancel_orders(self, order_ids: str | list[str]) -> CancelOrdersResponse:
+        """Cancel one or more orders.
+
+        Args:
+            order_ids: Single order ID or list of order IDs to cancel.
+
+        Returns:
+            CancelOrdersResponse with cancellation results.
+        """
+        if isinstance(order_ids, str):
+            order_ids = [order_ids]
+
+        payload = {"order_ids": order_ids}
+        data = await self._request("POST", "/brokerage/orders/batch_cancel", json_data=payload)
+        return CancelOrdersResponse.model_validate(data)
+
+    async def get_orders(
+        self,
+        *,
+        product_id: str | None = None,
+        order_status: list[str] | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+        **kwargs: Any,
+    ) -> list[Order]:
+        """Get historical orders.
+
+        Args:
+            product_id: Filter by product ID.
+            order_status: Filter by order status (e.g., ["OPEN", "FILLED"]).
+            limit: Maximum number of orders to return.
+            cursor: Pagination cursor.
+            **kwargs: Additional filter parameters.
+
+        Returns:
+            List of Order objects.
+        """
+        params: dict[str, Any] = {"limit": str(limit), **kwargs}
+        if product_id:
+            params["product_id"] = product_id
+        if order_status:
+            params["order_status"] = order_status
+        if cursor:
+            params["cursor"] = cursor
+
+        data = await self._request("GET", "/brokerage/orders/historical/batch", params=params)
+        response = OrdersResponse.model_validate(data)
+        return response.orders
+
+    async def get_order(self, order_id: str) -> Order:
+        """Get a specific order by ID.
+
+        Args:
+            order_id: The order ID.
+
+        Returns:
+            Order object.
+        """
+        data = await self._request("GET", f"/brokerage/orders/historical/{order_id}")
+        return Order.model_validate(data.get("order", data))
+
+    # ========================================================================
+    # Fill Methods
+    # ========================================================================
+
+    async def get_fills(
+        self,
+        *,
+        order_id: str | None = None,
+        product_id: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+        **kwargs: Any,
+    ) -> list[Fill]:
+        """Get historical fills (executed trades).
+
+        Args:
+            order_id: Filter by order ID.
+            product_id: Filter by product ID.
+            limit: Maximum number of fills to return.
+            cursor: Pagination cursor.
+            **kwargs: Additional filter parameters.
+
+        Returns:
+            List of Fill objects.
+        """
+        params: dict[str, Any] = {"limit": str(limit), **kwargs}
+        if order_id:
+            params["order_id"] = order_id
+        if product_id:
+            params["product_id"] = product_id
+        if cursor:
+            params["cursor"] = cursor
+
+        data = await self._request("GET", "/brokerage/orders/historical/fills", params=params)
+        response = FillsResponse.model_validate(data)
+        return response.fills
+
+
+# ============================================================================
+# Sync Client
+# ============================================================================
+
+
+class Client(BaseClient):
+    """Synchronous client for the Coinbase Advanced Trade API.
+
+    This client uses httpx for HTTP requests and provides full
+    type hints and Pydantic model responses.
+
+    Example:
+        >>> with Client(key="...", secret="...") as client:
+        ...     accounts = client.get_accounts()
+        ...     for account in accounts:
+        ...         print(f"{account.currency}: {account.available_balance.value}")
+    """
+
+    def __init__(self, key: str, secret: str, *, timeout: float | None = None) -> None:
+        """Initialize the sync client.
+
+        Args:
+            key: Your Coinbase API key name.
+            secret: Your Coinbase API secret (PEM-encoded private key).
+            timeout: Request timeout in seconds (default: 30).
+        """
+        super().__init__(key, secret, timeout=timeout)
+        self._client: httpx.Client | None = None
+
+    def __enter__(self) -> Client:
+        """Enter context manager."""
+        self._client = httpx.Client(timeout=self._timeout)
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        """Exit context manager."""
+        if self._client:
+            self._client.close()
+            self._client = None
+
+    def _request(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Make an authenticated API request."""
+        if self._client is None:
+            raise CoinbaseRequestError("Client not initialized. Use 'with' context manager.")
+
+        url = self._build_url(endpoint)
+        headers = self._get_headers(method, endpoint)
+
+        response = self._client.request(
+            method,
+            url,
+            headers=headers,
+            params=params,
+            json=json_data,
+        )
+        return self._handle_response(response)
+
+    # ========================================================================
+    # Account Methods
+    # ========================================================================
+
+    def get_accounts(self, *, limit: int = 250, cursor: str | None = None) -> list[Account]:
+        """Get all accounts for the authenticated user."""
+        params: dict[str, Any] = {"limit": str(limit)}
+        if cursor:
+            params["cursor"] = cursor
+
+        data = self._request("GET", "/brokerage/accounts", params=params)
+        response = AccountsResponse.model_validate(data)
+        return response.accounts
+
+    def get_account(self, account_id: str) -> Account:
+        """Get a specific account by ID."""
+        data = self._request("GET", f"/brokerage/accounts/{account_id}")
+        return Account.model_validate(data.get("account", data))
+
+    # ========================================================================
+    # Product Methods
+    # ========================================================================
+
+    def get_products(
+        self,
+        *,
+        product_type: str | None = None,
+        limit: int | None = None,
+    ) -> list[Product]:
+        """Get all available products."""
+        params: dict[str, Any] = {}
+        if product_type:
+            params["product_type"] = product_type
+        if limit:
+            params["limit"] = str(limit)
+
+        data = self._request("GET", "/brokerage/products", params=params or None)
+        response = ProductsResponse.model_validate(data)
+        return response.products
+
+    def get_product(self, product_id: str) -> Product:
+        """Get a specific product by ID."""
+        data = self._request("GET", f"/brokerage/products/{product_id}")
+        return Product.model_validate(data)
+
+    def get_candles(
+        self,
+        product_id: str,
+        *,
+        start: datetime | int | None = None,
+        end: datetime | int | None = None,
+        granularity: Granularity | str = Granularity.FIFTEEN_MINUTE,
+    ) -> list[dict[str, Any]]:
+        """Get historical candles for a product."""
+        now = datetime.now(timezone.utc)
+
+        if start is None:
+            start_ts = int((now - timedelta(hours=24)).timestamp())
+        elif isinstance(start, datetime):
+            start_ts = int(start.timestamp())
+        else:
+            start_ts = start
+
+        if end is None:
+            end_ts = int(now.timestamp())
+        elif isinstance(end, datetime):
+            end_ts = int(end.timestamp())
+        else:
+            end_ts = end
+
+        granularity_str = granularity.value if isinstance(granularity, Granularity) else granularity
+
+        params = {
+            "start": str(start_ts),
+            "end": str(end_ts),
+            "granularity": granularity_str,
+        }
+
+        data = self._request("GET", f"/brokerage/products/{product_id}/candles", params=params)
+        response = CandlesResponse.model_validate(data)
+        return [candle.model_dump() for candle in response.candles]
+
+    def get_market_trades(self, product_id: str, *, limit: int = 100) -> MarketTradesResponse:
+        """Get recent market trades for a product."""
+        params = {"limit": str(limit)}
+        data = self._request("GET", f"/brokerage/products/{product_id}/ticker", params=params)
+        return MarketTradesResponse.model_validate(data)
+
+    # ========================================================================
+    # Order Methods
+    # ========================================================================
+
+    def create_order(
+        self,
+        product_id: str,
+        side: OrderSide | str,
+        *,
+        order_type: str = "limit",
+        size: str | None = None,
+        price: str | None = None,
+        client_order_id: str | None = None,
+        **kwargs: Any,
+    ) -> CreateOrderResponse:
+        """Create a new order."""
+        if client_order_id is None:
+            client_order_id = str(uuid.uuid4())
+
+        side_str = side.value if isinstance(side, OrderSide) else side.upper()
+
+        if order_type.lower() == "market":
+            order_config = {"market_market_ioc": {"quote_size": str(size)}}
+        else:
+            if price is None:
+                raise ValueError("price is required for limit orders")
+            order_config = {
+                "limit_limit_gtc": {
+                    "base_size": str(size),
+                    "limit_price": str(price),
+                }
+            }
+
+        payload = {
+            "product_id": product_id,
+            "side": side_str,
+            "client_order_id": client_order_id,
+            "order_configuration": order_config,
+            **kwargs,
+        }
+
+        data = self._request("POST", "/brokerage/orders", json_data=payload)
+        return CreateOrderResponse.model_validate(data)
+
+    def cancel_orders(self, order_ids: str | list[str]) -> CancelOrdersResponse:
+        """Cancel one or more orders."""
+        if isinstance(order_ids, str):
+            order_ids = [order_ids]
+
+        payload = {"order_ids": order_ids}
+        data = self._request("POST", "/brokerage/orders/batch_cancel", json_data=payload)
+        return CancelOrdersResponse.model_validate(data)
+
+    def get_orders(
+        self,
+        *,
+        product_id: str | None = None,
+        order_status: list[str] | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+        **kwargs: Any,
+    ) -> list[Order]:
+        """Get historical orders."""
+        params: dict[str, Any] = {"limit": str(limit), **kwargs}
+        if product_id:
+            params["product_id"] = product_id
+        if order_status:
+            params["order_status"] = order_status
+        if cursor:
+            params["cursor"] = cursor
+
+        data = self._request("GET", "/brokerage/orders/historical/batch", params=params)
+        response = OrdersResponse.model_validate(data)
+        return response.orders
+
+    def get_order(self, order_id: str) -> Order:
+        """Get a specific order by ID."""
+        data = self._request("GET", f"/brokerage/orders/historical/{order_id}")
+        return Order.model_validate(data.get("order", data))
+
+    # ========================================================================
+    # Fill Methods
+    # ========================================================================
+
+    def get_fills(
+        self,
+        *,
+        order_id: str | None = None,
+        product_id: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+        **kwargs: Any,
+    ) -> list[Fill]:
+        """Get historical fills (executed trades)."""
+        params: dict[str, Any] = {"limit": str(limit), **kwargs}
+        if order_id:
+            params["order_id"] = order_id
+        if product_id:
+            params["product_id"] = product_id
+        if cursor:
+            params["cursor"] = cursor
+
+        data = self._request("GET", "/brokerage/orders/historical/fills", params=params)
+        response = FillsResponse.model_validate(data)
+        return response.fills
+
+
+# ============================================================================
+# Convenience Functions
+# ============================================================================
+
+
+@asynccontextmanager
+async def async_client(key: str, secret: str, **kwargs: Any) -> AsyncIterator[AsyncClient]:
+    """Create an async client as a context manager.
+
+    Example:
+        >>> async with async_client(key="...", secret="...") as client:
+        ...     products = await client.get_products()
+    """
+    client = AsyncClient(key, secret, **kwargs)
+    async with client:
+        yield client
+
+
+@contextmanager
+def sync_client(key: str, secret: str, **kwargs: Any) -> Iterator[Client]:
+    """Create a sync client as a context manager.
+
+    Example:
+        >>> with sync_client(key="...", secret="...") as client:
+        ...     products = client.get_products()
+    """
+    client = Client(key, secret, **kwargs)
+    with client:
+        yield client
