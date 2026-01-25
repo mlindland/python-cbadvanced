@@ -1,4 +1,0 @@
-requests>=2.20
-black
-jwt
-cryptography
