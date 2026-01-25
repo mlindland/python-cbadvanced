@@ -107,10 +107,15 @@ build:
     - tags
 
 # Publish to PyPI (manual trigger on tags)
+# Requires CI/CD variables: PYPI_API_TOKEN (or TWINE_USERNAME + TWINE_PASSWORD)
+# Set in GitLab: Settings > CI/CD > Variables
 publish:pypi:
   stage: build
   image: python:3.12
   extends: .python-base
+  variables:
+    TWINE_USERNAME: __token__
+    TWINE_PASSWORD: $PYPI_API_TOKEN
   script:
     - pip install build twine
     - python3 -m build
