@@ -1,20 +1,17 @@
 """Coinbase Advanced Trade API authentication module.
 
 This module provides JWT-based authentication for the Coinbase Advanced Trade API
-using ES256 (ECDSA with SHA-256) signing.
+using EdDSA (Ed25519) signing.
 """
 
 from __future__ import annotations
 
+import base64
 import secrets
 import time
-from typing import TYPE_CHECKING
 
 import jwt
-from cryptography.hazmat.primitives import serialization
-
-if TYPE_CHECKING:
-    from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 
 class CoinbaseAuth:
@@ -25,10 +22,10 @@ class CoinbaseAuth:
 
     Attributes:
         key_name: The API key name (used as 'sub' and 'kid' in JWT).
-        _private_key: The loaded EC private key for signing.
+        _private_key: The loaded Ed25519 private key for signing.
 
     Example:
-        >>> auth = CoinbaseAuth(key_name="your-key-name", key_secret="-----BEGIN EC PRIVATE KEY-----...")
+        >>> auth = CoinbaseAuth(key_name="your-key-name", key_secret="base64-encoded-key")
         >>> token = auth.build_jwt("GET", "/api/v3/brokerage/accounts")
     """
 
@@ -43,36 +40,35 @@ class CoinbaseAuth:
 
         Args:
             key_name: Your Coinbase API key name.
-            key_secret: Your Coinbase API secret (PEM-encoded EC private key).
+            key_secret: Your Coinbase API secret (base64-encoded Ed25519 key).
 
         Raises:
-            ValueError: If the key_secret is not a valid PEM-encoded private key.
+            ValueError: If the key_secret is not a valid Ed25519 key.
         """
         self.key_name = key_name
         self._private_key = self._load_private_key(key_secret)
 
     @staticmethod
-    def _load_private_key(key_secret: str) -> EllipticCurvePrivateKey:
-        """Load and validate the PEM-encoded private key.
+    def _load_private_key(key_secret: str) -> Ed25519PrivateKey:
+        """Load and validate the Ed25519 private key.
 
         Args:
-            key_secret: PEM-encoded EC private key string.
+            key_secret: Base64-encoded Ed25519 private key (32 or 64 bytes).
 
         Returns:
-            The loaded private key object.
+            The loaded Ed25519 private key.
 
         Raises:
             ValueError: If the key cannot be loaded or is invalid.
         """
         try:
-            private_key_bytes = key_secret.encode("utf-8")
-            private_key = serialization.load_pem_private_key(
-                private_key_bytes,
-                password=None,
-            )
-            return private_key  # type: ignore[return-value]
+            key_bytes = base64.b64decode(key_secret)
+            if len(key_bytes) not in (32, 64):
+                raise ValueError(f"Expected 32 or 64 bytes for Ed25519 key, got {len(key_bytes)}")
+            # Ed25519 seed is the first 32 bytes (64-byte keys have public key appended)
+            return Ed25519PrivateKey.from_private_bytes(key_bytes[:32])
         except Exception as e:
-            raise ValueError(f"Invalid private key: {e}") from e
+            raise ValueError(f"Invalid Ed25519 private key: {e}") from e
 
     def build_jwt(self, method: str, path: str, host: str = "api.coinbase.com") -> str:
         """Build a signed JWT token for API authentication.
@@ -99,7 +95,7 @@ class CoinbaseAuth:
         jwt_token: str = jwt.encode(
             jwt_payload,
             self._private_key,
-            algorithm="ES256",
+            algorithm="EdDSA",
             headers={
                 "kid": self.key_name,
                 "nonce": secrets.token_hex(16),
