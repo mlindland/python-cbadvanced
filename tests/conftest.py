@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-# Sample Ed25519 private key for testing (DO NOT use in production)
-# This is a base64-encoded Ed25519 key generated specifically for unit tests (EdDSA algorithm)
-TEST_PRIVATE_KEY = "ZSD+Z3KIDkNqnqo/3HlvmQ3ow7rS6hKo67T8Hx5FX8k="
+# Sample EC private key for testing (DO NOT use in production)
+# This is a P-256 test key generated specifically for unit tests (ES256 algorithm)
+TEST_PRIVATE_KEY = """-----BEGIN EC PRIVATE KEY-----
+MHcCAQEEIB7jXcGrFVewaEAZZQwsYylqT2Gdr9YBjFPNrdu4lC9DoAoGCCqGSM49
+AwEHoUQDQgAECjGEMQ8Be+9SYWWlauWpG/o66E67OiFnvxeyY31ZED5fUE6GLWpe
+UNpYLCUuTLGl2DDjRdvdY85W3utjiDna3w==
+-----END EC PRIVATE KEY-----"""
 
 TEST_KEY_NAME = "organizations/test-org/apiKeys/test-key"
 
