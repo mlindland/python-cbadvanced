@@ -25,6 +25,13 @@ class TestCoinbaseAuth:
         with pytest.raises(ValueError, match="Invalid Ed25519 private key"):
             CoinbaseAuth("test-key", "invalid-key-data")
 
+    def test_init_wrong_size_key(self) -> None:
+        """Test initialization with wrong-sized key (not 32 or 64 bytes)."""
+        # Valid base64 but wrong size (10 bytes instead of 32 or 64)
+        wrong_size_key = "MTIzNDU2Nzg5MA=="  # base64 of "1234567890"
+        with pytest.raises(ValueError, match="Expected 32 or 64 bytes"):
+            CoinbaseAuth("test-key", wrong_size_key)
+
     def test_build_jwt_structure(self, test_credentials: tuple[str, str]) -> None:
         """Test that JWT has correct structure."""
         key_name, key_secret = test_credentials
