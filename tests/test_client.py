@@ -581,9 +581,7 @@ class TestAsyncClient:
     """Tests for asynchronous AsyncClient."""
 
     @pytest.mark.asyncio
-    async def test_client_requires_context_manager(
-        self, test_credentials: tuple[str, str]
-    ) -> None:
+    async def test_client_requires_context_manager(self, test_credentials: tuple[str, str]) -> None:
         """Test that client raises error when used without context manager."""
         key_name, key_secret = test_credentials
         client = AsyncClient(key_name, key_secret)
