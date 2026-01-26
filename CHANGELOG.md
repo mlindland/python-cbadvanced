@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.2] - 2025-01-26
+
+### Changed
+
+- Reverted authentication from EdDSA (Ed25519) back to ECDSA (ES256) with PEM keys
+- This restores compatibility with the v3.0.0 key format
+
+## [3.0.1] - 2025-01-26
+
+### Changed
+
+- Simplified authentication to use EdDSA (Ed25519) with base64-encoded keys
+- Note: This was reverted in 3.0.2
+
 ## [3.0.0] - 2025-01-25
 
 ### Changed

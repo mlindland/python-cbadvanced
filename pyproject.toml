@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cbadvanced"
-version = "3.0.0"
+version = "3.0.2"
 description = "The unofficial Python client for the Coinbase Advanced Trade API"
 readme = "README.md"
 license = "MIT"
