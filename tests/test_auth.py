@@ -22,7 +22,7 @@ class TestCoinbaseAuth:
 
     def test_init_invalid_key(self) -> None:
         """Test initialization with invalid private key."""
-        with pytest.raises(ValueError, match="Invalid private key"):
+        with pytest.raises(ValueError, match="Invalid Ed25519 private key"):
             CoinbaseAuth("test-key", "invalid-key-data")
 
     def test_build_jwt_structure(self, test_credentials: tuple[str, str]) -> None:
@@ -77,7 +77,7 @@ class TestCoinbaseAuth:
         # Get headers
         header = jwt.get_unverified_header(token)
 
-        assert header["alg"] == "ES256"
+        assert header["alg"] == "EdDSA"
         assert header["kid"] == key_name
         assert "nonce" in header
 
